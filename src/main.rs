@@ -2,7 +2,10 @@ use clap::Clap;
 use std::convert::TryFrom;
 #[macro_use]
 extern crate diesel;
+extern crate redis;
 
+use redis::AsyncCommands;
+use redis::Commands;
 use actix_diesel::Database;
 use diesel::PgConnection;
 use futures::{try_join, StreamExt};
@@ -11,6 +14,8 @@ use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 use crate::configs::{Opts, SubCommand};
+use near_indexer::near_primitives;
+use near_primitives::views::{StateChangeValueView};
 
 mod aggregated;
 mod configs;
@@ -28,101 +33,54 @@ const INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
 const MAX_DELAY_TIME: std::time::Duration = std::time::Duration::from_secs(120);
 
 async fn handle_message(
-    pool: &actix_diesel::Database<PgConnection>,
     streamer_message: near_indexer::StreamerMessage,
     strict_mode: bool,
 ) -> anyhow::Result<()> {
-    db_adapters::blocks::store_block(&pool, &streamer_message.block).await?;
+    println!("handle_message");
 
-    // Chunks
-    db_adapters::chunks::store_chunks(
-        &pool,
-        &streamer_message.shards,
-        &streamer_message.block.header.hash,
-    )
-    .await?;
+    let redis_client = redis::Client::open("redis://127.0.0.1/")?;
+    let mut redis_connection = redis_client.get_async_connection().await?;
 
-    // Transaction
-    db_adapters::transactions::store_transactions(
-        &pool,
-        &streamer_message.shards,
-        &streamer_message.block.header.hash.to_string(),
-        streamer_message.block.header.timestamp,
-    )
-    .await;
+    let block_height = streamer_message.block.header.height;
+    let block_hash = streamer_message.block.header.hash;
 
-    // Receipts
-    for shard in &streamer_message.shards {
-        if let Some(chunk) = &shard.chunk {
-            db_adapters::receipts::store_receipts(
-                &pool,
-                &chunk.receipts,
-                &streamer_message.block.header.hash.to_string(),
-                &chunk.header.chunk_hash,
-                streamer_message.block.header.timestamp,
-                strict_mode,
-            )
-            .await?;
-        }
-    }
-
-    // ExecutionOutcomes
-    let execution_outcomes_future = db_adapters::execution_outcomes::store_execution_outcomes(
-        &pool,
-        &streamer_message.shards,
-        streamer_message.block.header.timestamp,
-    );
-
-    // Accounts
-    let accounts_future = async {
-        for shard in &streamer_message.shards {
-            db_adapters::accounts::handle_accounts(
-                &pool,
-                &shard.receipt_execution_outcomes,
-                streamer_message.block.header.height,
-            )
-            .await?;
-        }
-        Ok(())
-    };
-
-    if strict_mode {
-        // AccessKeys
-        let access_keys_future = async {
-            for shard in &streamer_message.shards {
-                db_adapters::access_keys::handle_access_keys(
-                    &pool,
-                    &shard.receipt_execution_outcomes,
-                    streamer_message.block.header.height,
-                )
-                .await?;
+    for state_change in streamer_message.state_changes {
+        match state_change.value {
+            StateChangeValueView::DataUpdate { account_id, key, value } => {
+                println!("DataUpdate {}", account_id);
+                let redis_key = [b"data:", account_id.as_ref().as_bytes(), b":", key.as_ref()].concat();
+                redis_connection.zadd(redis_key.clone(), block_hash.as_ref(), block_height).await?;
+                let value_vec: &[u8] = value.as_ref();
+                redis_connection.set([redis_key.clone(), b":".to_vec(), block_hash.0.to_vec()].concat(), value_vec).await?;
             }
-            Ok(())
-        };
+            StateChangeValueView::DataDeletion { account_id, key } => {
+                println!("DataDeletion {}", account_id);
+                let redis_key = [b"data:", account_id.as_ref().as_bytes(), b":", key.as_ref()].concat();
+                redis_connection.zadd(redis_key.clone(), block_hash.as_ref(), block_height).await?;
+            }
+            StateChangeValueView::ContractCodeUpdate { account_id, code} => {
+                println!("ContractCodeUpdate {}", account_id);
+                let redis_key = [b"code:", account_id.as_ref().as_bytes()].concat();
+                redis_connection.zadd(redis_key.clone(), block_hash.as_ref(), block_height).await?;
+                let value_vec: &[u8] = code.as_ref();
+                redis_connection.set([redis_key.clone(), b":".to_vec(), block_hash.0.to_vec()].concat(), value_vec).await?;
+            }
+            StateChangeValueView::ContractCodeDeletion { account_id } => {
+                println!("ContractCodeDeletion {}", account_id);
+                let redis_key = [b"code:", account_id.as_ref().as_bytes()].concat();
+                redis_connection.zadd(redis_key.clone(), block_hash.as_ref(), block_height).await?;
+            }
 
-        // StateChange related to Account
-        let account_changes_future = db_adapters::account_changes::store_account_changes(
-            &pool,
-            &streamer_message.state_changes,
-            &streamer_message.block.header.hash,
-            streamer_message.block.header.timestamp,
-        );
-
-        try_join!(
-            execution_outcomes_future,
-            accounts_future,
-            access_keys_future,
-            account_changes_future,
-        )?;
-    } else {
-        try_join!(execution_outcomes_future, accounts_future,)?;
+            _ => {
+            }
+        }
     }
+
     Ok(())
 }
 
 async fn listen_blocks(
     stream: mpsc::Receiver<near_indexer::StreamerMessage>,
-    pool: Database<PgConnection>,
     concurrency: std::num::NonZeroU16,
     strict_mode: bool,
     stop_after_number_of_blocks: Option<std::num::NonZeroUsize>,
@@ -146,7 +104,7 @@ async fn listen_blocks(
                 target: crate::INDEXER_FOR_EXPLORER,
                 "Block height {}", &streamer_message.block.header.height
             );
-            handle_message(&pool, streamer_message, strict_mode)
+            handle_message(streamer_message, strict_mode)
         });
     let mut handle_messages = if let Some(stop_after_n_blocks) = stop_after_number_of_blocks {
         handle_messages
@@ -169,7 +127,6 @@ async fn listen_blocks(
 
 /// Takes `home_dir` and `RunArgs` to build proper IndexerConfig and returns it
 async fn construct_near_indexer_config(
-    pool: &Database<PgConnection>,
     home_dir: std::path::PathBuf,
     args: configs::RunArgs,
 ) -> near_indexer::IndexerConfig {
@@ -194,6 +151,8 @@ async fn construct_near_indexer_config(
                 "delta is non zero, calculating..."
             );
 
+            panic!("oops");
+            /*
             db_adapters::blocks::latest_block_height(&pool)
                 .await
                 .ok()
@@ -207,6 +166,7 @@ async fn construct_near_indexer_config(
                     }
                 })
                 .unwrap_or_else(|| near_indexer::SyncModeEnum::FromInterruption)
+            */
         }
         configs::SyncModeSubCommand::SyncFromBlock(block_args) => {
             near_indexer::SyncModeEnum::BlockHeight(block_args.height)
@@ -229,10 +189,6 @@ fn main() {
     // We use it to automatically search the for root certificates to perform HTTPS calls
     // (sending telemetry and downloading genesis)
     openssl_probe::init_ssl_cert_env_vars();
-
-    // We establish connection as early as possible as an additional sanity check.
-    // Indexer should fail if .env file with credentials is missing/wrong
-    let pool = models::establish_connection();
 
     let mut env_filter = EnvFilter::new(
         "tokio_reactor=info,near=info,near=error,stats=info,telemetry=info,indexer=info,indexer_for_explorer=info,aggregated=info",
@@ -274,24 +230,14 @@ fn main() {
             let system = actix::System::new();
             system.block_on(async move {
                 let indexer_config =
-                    construct_near_indexer_config(&pool, home_dir, args.clone()).await;
+                    construct_near_indexer_config(home_dir, args.clone()).await;
                 let indexer = near_indexer::Indexer::new(indexer_config);
-                if args.store_genesis {
-                    let near_config = indexer.near_config().clone();
-                    db_adapters::genesis::store_genesis_records(pool.clone(), near_config.clone())
-                        .await
-                        .expect("Failed to store the records from the genesis");
-                }
 
                 // Regular indexer process starts here
                 let stream = indexer.streamer();
 
-                // Spawning the computation of aggregated data
-                aggregated::spawn_aggregated_computations(pool.clone(), &indexer);
-
                 listen_blocks(
                     stream,
-                    pool,
                     args.concurrency,
                     !args.non_strict_mode,
                     args.stop_after_number_of_blocks,
