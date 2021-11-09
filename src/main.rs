@@ -75,6 +75,7 @@ async fn handle_message(
             }
         }
     }
+    redis_connection.set(b"latest_block_height", block_height).await?;
 
     Ok(())
 }
