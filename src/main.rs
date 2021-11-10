@@ -48,10 +48,10 @@ async fn handle_message(
         match state_change.value {
             StateChangeValueView::DataUpdate { account_id, key, value } => {
                 println!("DataUpdate {}", account_id);
-                let redis_key = [b"data:", account_id.as_ref().as_bytes(), b":", key.as_ref()].concat();
-                redis_connection.zadd(redis_key.clone(), block_hash.as_ref(), block_height).await?;
+                let redis_key = [account_id.as_ref().as_bytes(), b":", key.as_ref()].concat();
+                redis_connection.zadd([b"data:".to_vec(), redis_key.clone()].concat(), block_hash.as_ref(), block_height).await?;
                 let value_vec: &[u8] = value.as_ref();
-                redis_connection.set([redis_key.clone(), b":".to_vec(), block_hash.0.to_vec()].concat(), value_vec).await?;
+                redis_connection.set([b"data-value:".to_vec(), redis_key.clone(), b":".to_vec(), block_hash.0.to_vec()].concat(), value_vec).await?;
             }
             StateChangeValueView::DataDeletion { account_id, key } => {
                 println!("DataDeletion {}", account_id);
