@@ -76,7 +76,7 @@ async fn handle_message(
                 let redis_key = account_id.as_ref().as_bytes();
                 redis_connection.zadd([b"account:", redis_key].concat(), block_hash.as_ref(), block_height).await?;
                 let value = account.try_to_vec().unwrap();
-                redis_connection.set([redis_key, b":", block_hash.as_ref()].concat(), value).await?;
+                redis_connection.set([b"account-data:", redis_key, b":", block_hash.as_ref()].concat(), value).await?;
             }
             StateChangeValueView::AccountDeletion { account_id } => {
                 println!("AccountDeletion {}", account_id);
