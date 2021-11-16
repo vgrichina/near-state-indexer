@@ -164,7 +164,7 @@ async fn construct_near_indexer_config(
 
             panic!("oops");
             /*
-            db_adapters::blocks::latest_block_height(&pool)
+            db_adapters::blocks::latest_block_height(pool)
                 .await
                 .ok()
                 .map(|latest_block_height| {
@@ -226,9 +226,7 @@ fn main() {
 
     let opts: Opts = Opts::parse();
 
-    let home_dir = opts
-        .home_dir
-        .unwrap_or_else(|| std::path::PathBuf::from(near_indexer::get_default_home()));
+    let home_dir = opts.home_dir.unwrap_or_else(near_indexer::get_default_home);
 
     match opts.subcmd {
         SubCommand::Run(args) => {
