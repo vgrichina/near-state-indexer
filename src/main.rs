@@ -17,6 +17,7 @@ use borsh::BorshSerialize;
 
 use crate::configs::{Opts, SubCommand};
 use near_indexer::near_primitives;
+use near_primitives::account::{Account};
 use near_primitives::views::{StateChangeValueView};
 
 mod aggregated;
@@ -75,7 +76,7 @@ async fn handle_message(
                 println!("AccountUpdate {}", account_id);
                 let redis_key = account_id.as_ref().as_bytes();
                 redis_connection.zadd([b"account:", redis_key].concat(), block_hash.as_ref(), block_height).await?;
-                let value = account.try_to_vec().unwrap();
+                let value = Account::from(account).try_to_vec().unwrap();
                 redis_connection.set([b"account-data:", redis_key, b":", block_hash.as_ref()].concat(), value).await?;
             }
             StateChangeValueView::AccountDeletion { account_id } => {
