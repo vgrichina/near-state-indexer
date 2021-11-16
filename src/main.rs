@@ -1,5 +1,6 @@
 use clap::Clap;
 use std::convert::TryFrom;
+use std::env;
 #[macro_use]
 extern crate diesel;
 extern crate redis;
@@ -37,9 +38,7 @@ async fn handle_message(
     streamer_message: near_indexer::StreamerMessage,
     _strict_mode: bool,
 ) -> anyhow::Result<()> {
-    println!("handle_message");
-
-    let redis_client = redis::Client::open("redis://127.0.0.1/")?;
+    let redis_client = redis::Client::open(format!(":{}", env::var("REDIS_HOST").is_err()))?;
     let mut redis_connection = redis_client.get_async_connection().await?;
 
     let block_height = streamer_message.block.header.height;
