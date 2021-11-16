@@ -38,7 +38,8 @@ async fn handle_message(
     streamer_message: near_indexer::StreamerMessage,
     _strict_mode: bool,
 ) -> anyhow::Result<()> {
-    let redis_client = redis::Client::open(format!(":{}", env::var("REDIS_HOST").is_err()))?;
+    let redis_url = env::var("REDIS_URL").unwrap_or("redis://127.0.0.1/".to_string());
+    let redis_client = redis::Client::open(redis_url)?;
     let mut redis_connection = redis_client.get_async_connection().await?;
 
     let block_height = streamer_message.block.header.height;
@@ -84,6 +85,7 @@ async fn handle_message(
             _ => {}
         }
     }
+    println!("latest_block_height {}", block_height);
     redis_connection.set(b"latest_block_height", block_height).await?;
 
     Ok(())
