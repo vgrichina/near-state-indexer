@@ -86,8 +86,12 @@ async fn handle_message(
             _ => {}
         }
     }
-    println!("latest_block_height {}", block_height);
-    redis_connection.set(b"latest_block_height", block_height).await?;
+
+    let disableBlockHeightUpdate = env::var("DISABLE_BLOCK_INDEX_UPDATE").unwrap_or("false".to_string());
+    if !(disableBlockHeightUpdate == "true" || disableBlockHeightUpdate == "yes") {
+        println!("latest_block_height {}", block_height);
+        redis_connection.set(b"latest_block_height", block_height).await?;
+    }
 
     Ok(())
 }
