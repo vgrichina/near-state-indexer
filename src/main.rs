@@ -112,12 +112,12 @@ async fn listen_blocks(
     }
     info!(target: crate::INDEXER_FOR_EXPLORER, "Stream has started");
     let handle_messages =
-        tokio_stream::wrappers::ReceiverStream::new(stream).map(|streamer_message| {
+        tokio_stream::wrappers::ReceiverStream::new(stream).map(|streamer_message| async {
             info!(
                 target: crate::INDEXER_FOR_EXPLORER,
                 "Block height {}", &streamer_message.block.header.height
             );
-            handle_message(streamer_message, strict_mode)
+            handle_message(streamer_message, strict_mode).await.map_err(|e| println!("error {}", e))
         });
     let mut handle_messages = if let Some(stop_after_n_blocks) = stop_after_number_of_blocks {
         handle_messages
