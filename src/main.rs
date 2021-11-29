@@ -7,6 +7,7 @@ extern crate redis;
 
 use redis::AsyncCommands;
 use redis::Commands;
+use redis::aio::Connection;
 use actix_diesel::Database;
 use diesel::PgConnection;
 use futures::{try_join, StreamExt};
@@ -35,13 +36,17 @@ const AGGREGATED: &str = "aggregated";
 const INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
 const MAX_DELAY_TIME: std::time::Duration = std::time::Duration::from_secs(120);
 
+async fn get_redis_connection() -> anyhow::Result<Connection> {
+    let redis_url = env::var("REDIS_URL").unwrap_or("redis://127.0.0.1/".to_string());
+    let redis_client = redis::Client::open(redis_url)?;
+    Ok(redis_client.get_async_connection().await?)
+}
+
 async fn handle_message(
     streamer_message: near_indexer::StreamerMessage,
     _strict_mode: bool,
 ) -> anyhow::Result<()> {
-    let redis_url = env::var("REDIS_URL").unwrap_or("redis://127.0.0.1/".to_string());
-    let redis_client = redis::Client::open(redis_url)?;
-    let mut redis_connection = redis_client.get_async_connection().await?;
+    let mut redis_connection = get_redis_connection().await?;
 
     let block_height = streamer_message.block.header.height;
     let block_hash = streamer_message.block.header.hash;
