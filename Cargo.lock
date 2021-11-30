@@ -62,21 +62,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "actix-diesel"
-version = "0.3.1-alpha.0"
-source = "git+https://github.com/frol/actix-diesel?branch=actix-0.11-beta.2#7066a04ccce15b20940d926758837c99954765cc"
-dependencies = [
- "actix",
- "actix-rt",
- "derive_more",
- "diesel",
- "futures",
- "num_cpus",
- "once_cell",
- "r2d2",
-]
-
-[[package]]
 name = "actix-http"
 version = "3.0.0-beta.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1222,46 +1207,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "diesel"
-version = "1.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b28135ecf6b7d446b43e27e225622a038cc4e2930a1022f51cdb97ada19b8e4d"
-dependencies = [
- "bigdecimal",
- "bitflags",
- "byteorder",
- "diesel_derives",
- "num-bigint 0.2.6",
- "num-integer",
- "num-traits",
- "pq-sys",
- "r2d2",
- "serde_json",
-]
-
-[[package]]
-name = "diesel-derive-enum"
-version = "1.1.0"
-source = "git+https://github.com/khorolets/diesel-derive-enum.git?branch=lookup-hack#f15b35927291d1e3be725fb2321da6edb91704aa"
-dependencies = [
- "heck",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "diesel_derives"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45f5098f628d02a7a0f68ddba586fb61e80edec3bdc1be3b921f4ceec60858d3"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "digest"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1835,7 +1780,6 @@ name = "indexer-explorer"
 version = "0.10.3"
 dependencies = [
  "actix",
- "actix-diesel",
  "actix-http",
  "actix-rt",
  "actix-tls",
@@ -1847,8 +1791,6 @@ dependencies = [
  "borsh 0.9.1",
  "chrono",
  "clap",
- "diesel",
- "diesel-derive-enum",
  "dotenv",
  "futures",
  "hex",
@@ -3326,15 +3268,6 @@ name = "ppv-lite86"
 version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac74c624d6b2d21f425f752262f42188365d7b8ff1aff74c82e45136510a4857"
-
-[[package]]
-name = "pq-sys"
-version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ac25eee5a0582f45a67e837e350d784e7003bd29a5f460796772061ca49ffda"
-dependencies = [
- "vcpkg",
-]
 
 [[package]]
 name = "primitive-types"

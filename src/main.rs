@@ -2,14 +2,11 @@ use clap::Clap;
 use std::convert::TryFrom;
 use std::env;
 #[macro_use]
-extern crate diesel;
 extern crate redis;
 
 use redis::AsyncCommands;
 use redis::Commands;
 use redis::aio::Connection;
-use actix_diesel::Database;
-use diesel::PgConnection;
 use futures::{try_join, StreamExt};
 use tokio::sync::mpsc;
 use tracing::{info, warn};
@@ -21,11 +18,7 @@ use near_indexer::near_primitives;
 use near_primitives::account::{Account};
 use near_primitives::views::{StateChangeValueView};
 
-mod aggregated;
 mod configs;
-mod db_adapters;
-mod models;
-mod schema;
 #[macro_use]
 mod retriable;
 

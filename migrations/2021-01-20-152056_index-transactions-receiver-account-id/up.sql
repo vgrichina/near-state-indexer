@@ -1,1 +1,0 @@
-CREATE INDEX transactions_receiver_account_id_idx ON transactions (receiver_account_id);

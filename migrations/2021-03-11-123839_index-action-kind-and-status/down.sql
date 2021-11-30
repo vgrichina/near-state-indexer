@@ -1,3 +1,0 @@
-DROP INDEX transactions_actions_action_kind_idx;
-DROP INDEX action_receipt_actions_action_kind_idx;
-DROP INDEX execution_outcomes_status_idx;
