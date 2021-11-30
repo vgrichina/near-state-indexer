@@ -4,19 +4,19 @@ use std::env;
 #[macro_use]
 extern crate redis;
 
+use borsh::BorshSerialize;
+use futures::{try_join, StreamExt};
+use redis::aio::Connection;
 use redis::AsyncCommands;
 use redis::Commands;
-use redis::aio::Connection;
-use futures::{try_join, StreamExt};
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
-use borsh::BorshSerialize;
 
 use crate::configs::{Opts, SubCommand};
 use near_indexer::near_primitives;
-use near_primitives::account::{Account};
-use near_primitives::views::{StateChangeValueView};
+use near_primitives::account::Account;
+use near_primitives::views::StateChangeValueView;
 
 mod configs;
 #[macro_use]
@@ -46,49 +46,105 @@ async fn handle_message(
 
     for state_change in streamer_message.state_changes {
         match state_change.value {
-            StateChangeValueView::DataUpdate { account_id, key, value } => {
+            StateChangeValueView::DataUpdate {
+                account_id,
+                key,
+                value,
+            } => {
                 println!("DataUpdate {}", account_id);
                 let redis_key = [account_id.as_ref().as_bytes(), b":", key.as_ref()].concat();
-                redis_connection.zadd([b"data:", redis_key.as_slice()].concat(), block_hash.as_ref(), block_height).await?;
+                redis_connection
+                    .zadd(
+                        [b"data:", redis_key.as_slice()].concat(),
+                        block_hash.as_ref(),
+                        block_height,
+                    )
+                    .await?;
                 let value_vec: &[u8] = value.as_ref();
-                redis_connection.set([b"data-value:", redis_key.as_slice(), b":", block_hash.as_ref()].concat(), value_vec).await?;
+                redis_connection
+                    .set(
+                        [
+                            b"data-value:",
+                            redis_key.as_slice(),
+                            b":",
+                            block_hash.as_ref(),
+                        ]
+                        .concat(),
+                        value_vec,
+                    )
+                    .await?;
             }
             StateChangeValueView::DataDeletion { account_id, key } => {
                 println!("DataDeletion {}", account_id);
-                let redis_key = [b"data:", account_id.as_ref().as_bytes(), b":", key.as_ref()].concat();
-                redis_connection.zadd(redis_key, block_hash.as_ref(), block_height).await?;
+                let redis_key =
+                    [b"data:", account_id.as_ref().as_bytes(), b":", key.as_ref()].concat();
+                redis_connection
+                    .zadd(redis_key, block_hash.as_ref(), block_height)
+                    .await?;
             }
-            StateChangeValueView::ContractCodeUpdate { account_id, code} => {
+            StateChangeValueView::ContractCodeUpdate { account_id, code } => {
                 println!("ContractCodeUpdate {}", account_id);
                 let redis_key = [b"code:", account_id.as_ref().as_bytes()].concat();
-                redis_connection.zadd(redis_key.as_slice(), block_hash.as_ref(), block_height).await?;
+                redis_connection
+                    .zadd(redis_key.as_slice(), block_hash.as_ref(), block_height)
+                    .await?;
                 let value_vec: &[u8] = code.as_ref();
-                redis_connection.set([redis_key.as_slice(), b":", block_hash.as_ref()].concat(), value_vec).await?;
+                redis_connection
+                    .set(
+                        [redis_key.as_slice(), b":", block_hash.as_ref()].concat(),
+                        value_vec,
+                    )
+                    .await?;
             }
             StateChangeValueView::ContractCodeDeletion { account_id } => {
                 println!("ContractCodeDeletion {}", account_id);
                 let redis_key = [b"code:", account_id.as_ref().as_bytes()].concat();
-                redis_connection.zadd(redis_key, block_hash.as_ref(), block_height).await?;
+                redis_connection
+                    .zadd(redis_key, block_hash.as_ref(), block_height)
+                    .await?;
             }
-            StateChangeValueView::AccountUpdate { account_id, account } => {
+            StateChangeValueView::AccountUpdate {
+                account_id,
+                account,
+            } => {
                 println!("AccountUpdate {}", account_id);
                 let redis_key = account_id.as_ref().as_bytes();
-                redis_connection.zadd([b"account:", redis_key].concat(), block_hash.as_ref(), block_height).await?;
+                redis_connection
+                    .zadd(
+                        [b"account:", redis_key].concat(),
+                        block_hash.as_ref(),
+                        block_height,
+                    )
+                    .await?;
                 let value = Account::from(account).try_to_vec().unwrap();
-                redis_connection.set([b"account-data:", redis_key, b":", block_hash.as_ref()].concat(), value).await?;
+                redis_connection
+                    .set(
+                        [b"account-data:", redis_key, b":", block_hash.as_ref()].concat(),
+                        value,
+                    )
+                    .await?;
             }
             StateChangeValueView::AccountDeletion { account_id } => {
                 println!("AccountDeletion {}", account_id);
-                redis_connection.zadd([b"account:", account_id.as_ref().as_bytes()].concat(), block_hash.as_ref(), block_height).await?;
+                redis_connection
+                    .zadd(
+                        [b"account:", account_id.as_ref().as_bytes()].concat(),
+                        block_hash.as_ref(),
+                        block_height,
+                    )
+                    .await?;
             }
             _ => {}
         }
     }
 
-    let disableBlockHeightUpdate = env::var("DISABLE_BLOCK_INDEX_UPDATE").unwrap_or("false".to_string());
+    let disableBlockHeightUpdate =
+        env::var("DISABLE_BLOCK_INDEX_UPDATE").unwrap_or("false".to_string());
     if !(disableBlockHeightUpdate == "true" || disableBlockHeightUpdate == "yes") {
         println!("latest_block_height {}", block_height);
-        redis_connection.set(b"latest_block_height", block_height).await?;
+        redis_connection
+            .set(b"latest_block_height", block_height)
+            .await?;
     }
 
     Ok(())
@@ -119,7 +175,9 @@ async fn listen_blocks(
                 target: crate::INDEXER_FOR_EXPLORER,
                 "Block height {}", &streamer_message.block.header.height
             );
-            handle_message(streamer_message, strict_mode).await.map_err(|e| println!("error {}", e))
+            handle_message(streamer_message, strict_mode)
+                .await
+                .map_err(|e| println!("error {}", e))
         });
     let mut handle_messages = if let Some(stop_after_n_blocks) = stop_after_number_of_blocks {
         handle_messages
@@ -166,8 +224,11 @@ async fn construct_near_indexer_config(
                 "delta is non zero, calculating..."
             );
 
-            let mut redis_connection = get_redis_connection().await.expect("error connecting to Redis");
-            redis_connection.get(b"latest_block_height")
+            let mut redis_connection = get_redis_connection()
+                .await
+                .expect("error connecting to Redis");
+            redis_connection
+                .get(b"latest_block_height")
                 .await
                 .ok()
                 .map(|latest_block_height: Option<u64>| {
@@ -240,8 +301,7 @@ fn main() {
 
             let system = actix::System::new();
             system.block_on(async move {
-                let indexer_config =
-                    construct_near_indexer_config(home_dir, args.clone()).await;
+                let indexer_config = construct_near_indexer_config(home_dir, args.clone()).await;
                 let indexer = near_indexer::Indexer::new(indexer_config);
 
                 // Regular indexer process starts here
