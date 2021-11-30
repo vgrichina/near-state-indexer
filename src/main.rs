@@ -173,12 +173,11 @@ async fn construct_near_indexer_config(
                 "delta is non zero, calculating..."
             );
 
-            panic!("oops");
-            /*
-            db_adapters::blocks::latest_block_height(pool)
+            let mut redis_connection = get_redis_connection().await.expect("error connecting to Redis");
+            redis_connection.get(b"latest_block_height")
                 .await
                 .ok()
-                .map(|latest_block_height| {
+                .map(|latest_block_height: Option<u64>| {
                     if let Some(height) = latest_block_height {
                         near_indexer::SyncModeEnum::BlockHeight(
                             height.saturating_sub(interruption_args.delta),
@@ -188,7 +187,6 @@ async fn construct_near_indexer_config(
                     }
                 })
                 .unwrap_or_else(|| near_indexer::SyncModeEnum::FromInterruption)
-            */
         }
         configs::SyncModeSubCommand::SyncFromBlock(block_args) => {
             near_indexer::SyncModeEnum::BlockHeight(block_args.height)
