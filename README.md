@@ -1,28 +1,14 @@
-# NEAR Indexer for Explorer
+# NEAR State Indexer
 
-NEAR Indexer for Explorer is built on top of [NEAR Indexer microframework](https://github.com/nearprotocol/nearcore/tree/master/chain/indexer) to watch the network and store all the events in the PostgreSQL database.
+NEAR State Indexer is built on top of [NEAR Indexer microframework](https://github.com/near/nearcore/tree/master/chain/indexer) to watch the network and store all the state changes in the Redis database.
+It can be consumed by https://github.com/vgrichina/fast-near to run NEAR RPC service.
 
-## Shared Public Access
-
-NEAR runs the indexer and maintains it for [NEAR Explorer](https://github.com/near/near-explorer), [NEAR Wallet](https://github.com/near/near-wallet), and some other internal services. It proved to be a great source of data for various analysis and services, so we decided to give a shared read-only public access to the data:
-
-* testnet credentials: `postgres://public_readonly:nearprotocol@35.184.214.98/testnet_explorer`
-* mainnet credentials: `postgres://public_readonly:nearprotocol@104.199.89.51/mainnet_explorer`
-
-WARNING: We may evolve the data schemas, so make sure you follow the release notes of this repository.
-
-NOTE: Please, keep in mind that the access to the database is shared across everyone in the world, so it is better to make sure you limit the amount of queris and individual queries are efficient.
 
 ## Self-hosting
 
 Before you proceed, make sure you have the following software installed:
 * [rustup](https://rustup.rs/) or Rust version that is mentioned in `rust-toolchain` file in the root of [nearcore](https://github.com/nearprotocol/nearcore) project.
 
-Install `libpq-dev` dependency
-
-```bash
-$ sudo apt install libpq-dev
-```
 
 Clone this repository and open the project folder
 
@@ -31,26 +17,13 @@ $ git clone git@github.com:near/near-indexer-for-explorer.git
 $ cd near-indexer-for-explorer
 ```
 
-You need to provide database credentials in `.env` file like below (replace `user`, `password`, `host` and `db_name` with yours):
+You need to provide database credentials in `.env` file like below (replace Redis connection string as needed):
 
 ```bash
-$ echo "DATABASE_URL=postgres://user:password@host/db_name" > .env
+$ echo "REDIS_URL=redis://127.0.0.1/" > .env
 ```
 
-Then you need to apply migrations to create necessary database structure. For this you'll need `diesel-cli`, you can install it like so:
-
-
-```bash
-$ cargo install diesel_cli --no-default-features --features "postgres"
-```
-
-And apply migrations
-
-```bash
-$ diesel migration run
-```
-
-To connect NEAR Indexer for Explorer to the specific chain you need to have necessary configs, you can generate it as follows:
+To connect the specific chain you need to have necessary configs, you can generate it as follows:
 
 ```bash
 $ cargo run --release -- --home-dir ~/.near/testnet init --chain-id testnet --download
@@ -114,28 +87,6 @@ After the network is synced, you should see logs of every block height currently
 ![database structure](docs/near-indexer-for-explorer-db.png)
 
 
-## Creating read-only PostgreSQL user
-
-We highly recommend using a separate read-only user to access the data to avoid unexcepted corruption of the indexed data.
-
-We use `public` schema for all tables. By default, new users have the possibility to create new tables/views/etc there. If you want to restrict that, you have to revoke these rights:
-
-```sql
-REVOKE CREATE ON SCHEMA PUBLIC FROM PUBLIC;
-REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA PUBLIC FROM PUBLIC;
-```
-
-After that, you could create read-only user in PostgreSQL:
-
-```sql
-CREATE USER explorer with password 'password';
-GRANT readonly TO explorer;
-```
-
-```bash
-$ PGPASSWORD="password" psql -h 127.0.0.1 -U explorer databasename
-```
-
 ## Syncing
 
 Whenever you run NEAR Indexer for Explorer for any network except localnet you'll need to sync with the network. This is required because it's a natural behavior of `nearcore` node and NEAR Indexer for Explorer is a wrapper for the regular `nearcore` node. In order to work and index the data your node must be synced with the network. This process can take a while, so we suggest to download a fresh backup of the `data` folder and put it in you `--home-dir` of your choice (by default it is `~/.near`)
@@ -177,9 +128,9 @@ See https://docs.near.org/docs/roles/integrator/exchange-integration#running-an-
 ## Local debugging
 
 If you want to play with the code locally, it's better not to copy existing mainnet/testnet (it requires LOTS of memory), but to have your own small example.
-You need to have empty DB (we suggest to use [Docker](https://hub.docker.com/_/postgres) for that).
-Go through steps [above](https://github.com/near/near-indexer-for-explorer#self-hosting) until (including) diesel migration.
-Then,
+Go through steps [above](https://github.com/near/near-indexer-for-explorer#self-hosting) until (by not including) `init` command.
+
+Then use `init` command with different arguments,
 
 ```bash
 $ cargo run --release -- --home-dir ~/.near/localnet init --chain-id localnet
