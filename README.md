@@ -37,7 +37,7 @@ While this issue is open https://github.com/nearprotocol/nearcore/issues/3156 yo
  - [betanet config.json](https://s3-us-west-1.amazonaws.com/build.nearprotocol.com/nearcore-deploy/betanet/config.json)
  - [mainnet config.json](https://s3-us-west-1.amazonaws.com/build.nearprotocol.com/nearcore-deploy/mainnet/config.json)
 
-Configs for the specified network are in the `--home-dir` provided folder. We need to ensure that NEAR Indexer for Explorer follows
+Configs for the specified network are in the `--home-dir` provided folder. We need to ensure that NEAR State Indexer follows
 all the necessary shards, so `"tracked_shards"` parameters in `~/.near/testnet/config.json` needs to be configured properly.
 For example, with a single shared network, you just add the shard #0 to the list:
 
@@ -47,18 +47,18 @@ For example, with a single shared network, you just add the shard #0 to the list
 ...
 ```
 
-## Running NEAR Indexer for Explorer:
+## Running NEAR State Indexer:
 
-Command to run NEAR Indexer for Explorer have to contain sync mode.
+Command to run NEAR State Indexer have to contain sync mode.
 
-You can choose NEAR Indexer for Explorer sync mode by setting what to stream:
+You can choose NEAR State Indexer sync mode by setting what to stream:
  - `sync-from-latest` - start indexing blocks from the latest finalized block
  - `sync-from-interruption --delta <number_of_blocks>` - start indexing blocks from the block NEAR Indexer was interrupted last time but earlier for `<number_of_blocks>` if provided
  - `sync-from-block --height <block_height>` - start indexing blocks from the specific block height
 
 Optionally you can tell Indexer to store data from genesis (Accounts and Access Keys) by adding key `--store-genesis` to the `run` command.
 
-NEAR Indexer for Explorer works in strict mode by default, but you can disable it for specific amount of blocks. The strict mode means that every piece of data
+NEAR State Indexer works in strict mode by default, but you can disable it for specific amount of blocks. The strict mode means that every piece of data
 will be retried to store to database in case of error. Errors may occur when the parent piece of data is still processed but the child piece is already
 trying to be stored. So Indexer keeps retrying to store the data until success. However if you're running Indexer not from the genesis it is possible that you
 really miss some of parent data and it'll be impossible to store child one, so you can disable strict mode for 1000 blocks to ensure you've passed the strong
@@ -72,26 +72,21 @@ To disable strict mode you need to provide:
 
 Sometimes you may want to index block while sync process is happening, by default an indexer node is waiting for full sync to complete but you can enable indexing while the node is syncing by passing `--stream-while-syncing`
 
-By default NEAR Indexer for Explorer processes only a single block at a time. You can adjust this with the `--concurrency` argument (when the blocks are mostly empty, it is fine to go with as many as 100 blocks of concurrency).
+By default NEAR State Indexer processes only a single block at a time. You can adjust this with the `--concurrency` argument (when the blocks are mostly empty, it is fine to go with as many as 100 blocks of concurrency).
 
-So final command to run NEAR Indexer for Explorer can look like:
+So final command to run NEAR State Indexer can look like:
 
 ```bash
 $ cargo run --release -- --home-dir ~/.near/testnet run --store-genesis --stream-while-syncing --allow-missing-relations-in-first-blocks 1000 --concurrency 1 sync-from-latest
 ```
 
-After the network is synced, you should see logs of every block height currently received by NEAR Indexer for Explorer.
-
-## Database structure
-
-![database structure](docs/near-indexer-for-explorer-db.png)
-
+After the network is synced, you should see logs of every block height currently received by NEAR State Indexer.
 
 ## Syncing
 
-Whenever you run NEAR Indexer for Explorer for any network except localnet you'll need to sync with the network. This is required because it's a natural behavior of `nearcore` node and NEAR Indexer for Explorer is a wrapper for the regular `nearcore` node. In order to work and index the data your node must be synced with the network. This process can take a while, so we suggest to download a fresh backup of the `data` folder and put it in you `--home-dir` of your choice (by default it is `~/.near`)
+Whenever you run NEAR State Indexer for any network except localnet you'll need to sync with the network. This is required because it's a natural behavior of `nearcore` node and NEAR State Indexer is a wrapper for the regular `nearcore` node. In order to work and index the data your node must be synced with the network. This process can take a while, so we suggest to download a fresh backup of the `data` folder and put it in you `--home-dir` of your choice (by default it is `~/.near`)
 
-Running your NEAR Indexer for Explorer node on top of a backup data will reduce the time of syncing process because your node will download only missing data and it will take reasonable time.
+Running your NEAR State Indexer node on top of a backup data will reduce the time of syncing process because your node will download only missing data and it will take reasonable time.
 
 All the backups can be downloaded from the public S3 bucket which contains latest daily snapshots:
 
@@ -99,7 +94,7 @@ All the backups can be downloaded from the public S3 bucket which contains lates
 * [Recent 5-epoch Testnet data folder](https://near-protocol-public.s3.ca-central-1.amazonaws.com/backups/testnet/rpc/data.tar)
 
 
-## Running NEAR Indexer for Explorer as archival node
+## Running NEAR State Indexer as archival node
 
 It's not necessary but in order to index everything in the network it is better to do it from the genesis. `nearcore` node is running in non-archival mode by default. That means that the node keeps data only for [5 last epochs](https://docs.near.org/docs/concepts/epoch). In order to index data from the genesis we need to turn the node in archival mode.
 
