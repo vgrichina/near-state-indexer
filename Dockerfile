@@ -12,7 +12,6 @@ RUN apt-get update -qq && apt-get install -y \
     curl \
     llvm \
     clang \
-    libpq-dev \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
@@ -55,7 +54,6 @@ FROM ubuntu:18.04 as execution
 
 RUN apt-get update -qq && apt-get install -y \
     libssl-dev \
-    libpq-dev \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
