@@ -1,14 +1,11 @@
-use clap::Clap;
+use clap::Parser;
 use std::convert::TryFrom;
 use std::env;
-#[macro_use]
-extern crate redis;
 
 use borsh::BorshSerialize;
-use futures::{try_join, StreamExt};
+use futures::StreamExt;
 use redis::aio::Connection;
 use redis::AsyncCommands;
-use redis::Commands;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
@@ -24,13 +21,9 @@ mod retriable;
 
 // Categories for logging
 const INDEXER_FOR_EXPLORER: &str = "indexer_for_explorer";
-const AGGREGATED: &str = "aggregated";
-
-const INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
-const MAX_DELAY_TIME: std::time::Duration = std::time::Duration::from_secs(120);
 
 async fn get_redis_connection() -> anyhow::Result<Connection> {
-    let redis_url = env::var("REDIS_URL").unwrap_or("redis://127.0.0.1/".to_string());
+    let redis_url = env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1/".to_string());
     let redis_client = redis::Client::open(redis_url)?;
     Ok(redis_client.get_async_connection().await?)
 }
@@ -100,8 +93,8 @@ async fn handle_message(streamer_message: near_indexer::StreamerMessage, _strict
         }
     }
 
-    let disableBlockHeightUpdate = env::var("DISABLE_BLOCK_INDEX_UPDATE").unwrap_or("false".to_string());
-    if !(disableBlockHeightUpdate == "true" || disableBlockHeightUpdate == "yes") {
+    let disable_block_height_update = env::var("DISABLE_BLOCK_INDEX_UPDATE").unwrap_or_else(|_| "false".to_string());
+    if !(disable_block_height_update == "true" || disable_block_height_update == "yes") {
         println!("latest_block_height {}", block_height);
         redis_connection.set(b"latest_block_height", block_height).await?;
     }
