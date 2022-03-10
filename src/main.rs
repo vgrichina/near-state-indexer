@@ -224,7 +224,7 @@ fn main() {
             let system = actix::System::new();
             system.block_on(async move {
                 let indexer_config = construct_near_indexer_config(home_dir, args.clone()).await;
-                let indexer = near_indexer::Indexer::new(indexer_config);
+                let indexer = near_indexer::Indexer::new(indexer_config).unwrap();
 
                 // Regular indexer process starts here
                 let stream = indexer.streamer();
