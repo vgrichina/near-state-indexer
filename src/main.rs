@@ -41,53 +41,54 @@ async fn handle_message(streamer_message: near_indexer::StreamerMessage, _strict
                     println!("DataUpdate {}", account_id);
                     let redis_key = [account_id.as_ref().as_bytes(), b":", key.as_ref()].concat();
                     redis_connection
-                        .zadd([b"data:", redis_key.as_slice()].concat(), block_hash.as_ref(), block_height)
+                        .zadd([b"h:d:", redis_key.as_slice()].concat(), block_hash.as_ref(), block_height)
                         .await?;
                     let value_vec: &[u8] = value.as_ref();
                     redis_connection
-                        .set([b"data-value:", redis_key.as_slice(), b":", block_hash.as_ref()].concat(), value_vec)
+                        .set([b"d:d:", redis_key.as_slice(), b":", block_hash.as_ref()].concat(), value_vec)
                         .await?;
                 }
                 StateChangeValueView::DataDeletion { account_id, key } => {
                     println!("DataDeletion {}", account_id);
-                    let redis_key = [b"data:", account_id.as_ref().as_bytes(), b":", key.as_ref()].concat();
+                    let redis_key = [b"h:d:", account_id.as_ref().as_bytes(), b":", key.as_ref()].concat();
                     redis_connection
                         .zadd(redis_key, block_hash.as_ref(), block_height)
                         .await?;
                 }
                 StateChangeValueView::ContractCodeUpdate { account_id, code } => {
                     println!("ContractCodeUpdate {}", account_id);
-                    let redis_key = [b"code:", account_id.as_ref().as_bytes()].concat();
+                    let redis_key = account_id.as_ref().as_bytes();
                     redis_connection
-                        .zadd(redis_key.as_slice(), block_hash.as_ref(), block_height)
+                        .zadd([b"h:c:", redis_key].concat(), block_hash.as_ref(), block_height)
                         .await?;
                     let value_vec: &[u8] = code.as_ref();
                     redis_connection
-                        .set([redis_key.as_slice(), b":", block_hash.as_ref()].concat(), value_vec)
+                        .set([b"d:c:", redis_key, b":", block_hash.as_ref()].concat(), value_vec)
                         .await?;
                 }
                 StateChangeValueView::ContractCodeDeletion { account_id } => {
                     println!("ContractCodeDeletion {}", account_id);
-                    let redis_key = [b"code:", account_id.as_ref().as_bytes()].concat();
+                    let redis_key = account_id.as_ref().as_bytes();
                     redis_connection
-                        .zadd(redis_key, block_hash.as_ref(), block_height)
+                        .zadd([b"h:c:", redis_key].concat(), block_hash.as_ref(), block_height)
                         .await?;
                 }
                 StateChangeValueView::AccountUpdate { account_id, account } => {
                     println!("AccountUpdate {}", account_id);
                     let redis_key = account_id.as_ref().as_bytes();
                     redis_connection
-                        .zadd([b"account:", redis_key].concat(), block_hash.as_ref(), block_height)
+                        .zadd([b"h:a:", redis_key].concat(), block_hash.as_ref(), block_height)
                         .await?;
                     let value = Account::from(account).try_to_vec().unwrap();
                     redis_connection
-                        .set([b"account-data:", redis_key, b":", block_hash.as_ref()].concat(), value)
+                        .set([b"d:a:", redis_key, b":", block_hash.as_ref()].concat(), value)
                         .await?;
                 }
                 StateChangeValueView::AccountDeletion { account_id } => {
                     println!("AccountDeletion {}", account_id);
+                    let redis_key = account_id.as_ref().as_bytes();
                     redis_connection
-                        .zadd([b"account:", account_id.as_ref().as_bytes()].concat(), block_hash.as_ref(), block_height)
+                        .zadd([b"h:a:", redis_key].concat(), block_hash.as_ref(), block_height)
                         .await?;
                 }
                 _ => {}
