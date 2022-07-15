@@ -32,6 +32,7 @@ async fn handle_message(streamer_message: near_indexer::StreamerMessage, _strict
     let mut redis_connection = get_redis_connection().await?;
 
     let block_height = streamer_message.block.header.height;
+    let block_timestamp = streamer_message.block.header.timestamp;
     let block_hash = streamer_message.block.header.hash;
 
     for shard in streamer_message.shards {
@@ -95,6 +96,8 @@ async fn handle_message(streamer_message: near_indexer::StreamerMessage, _strict
             }
         }
     }
+
+    redis_connection.set([b"t:", block_height.to_string().as_bytes()].concat(), block_timestamp.to_string()).await?;
 
     let disable_block_height_update = env::var("DISABLE_BLOCK_INDEX_UPDATE").unwrap_or_else(|_| "false".to_string());
     if !(disable_block_height_update == "true" || disable_block_height_update == "yes") {
