@@ -34,62 +34,64 @@ async fn handle_message(streamer_message: near_indexer::StreamerMessage, _strict
     let block_height = streamer_message.block.header.height;
     let block_hash = streamer_message.block.header.hash;
 
-    for state_change in streamer_message.state_changes {
-        match state_change.value {
-            StateChangeValueView::DataUpdate { account_id, key, value } => {
-                println!("DataUpdate {}", account_id);
-                let redis_key = [account_id.as_ref().as_bytes(), b":", key.as_ref()].concat();
-                redis_connection
-                    .zadd([b"data:", redis_key.as_slice()].concat(), block_hash.as_ref(), block_height)
-                    .await?;
-                let value_vec: &[u8] = value.as_ref();
-                redis_connection
-                    .set([b"data-value:", redis_key.as_slice(), b":", block_hash.as_ref()].concat(), value_vec)
-                    .await?;
+    for shard in streamer_message.shards {
+        for state_change in shard.state_changes {
+            match state_change.value {
+                StateChangeValueView::DataUpdate { account_id, key, value } => {
+                    println!("DataUpdate {}", account_id);
+                    let redis_key = [account_id.as_ref().as_bytes(), b":", key.as_ref()].concat();
+                    redis_connection
+                        .zadd([b"data:", redis_key.as_slice()].concat(), block_hash.as_ref(), block_height)
+                        .await?;
+                    let value_vec: &[u8] = value.as_ref();
+                    redis_connection
+                        .set([b"data-value:", redis_key.as_slice(), b":", block_hash.as_ref()].concat(), value_vec)
+                        .await?;
+                }
+                StateChangeValueView::DataDeletion { account_id, key } => {
+                    println!("DataDeletion {}", account_id);
+                    let redis_key = [b"data:", account_id.as_ref().as_bytes(), b":", key.as_ref()].concat();
+                    redis_connection
+                        .zadd(redis_key, block_hash.as_ref(), block_height)
+                        .await?;
+                }
+                StateChangeValueView::ContractCodeUpdate { account_id, code } => {
+                    println!("ContractCodeUpdate {}", account_id);
+                    let redis_key = [b"code:", account_id.as_ref().as_bytes()].concat();
+                    redis_connection
+                        .zadd(redis_key.as_slice(), block_hash.as_ref(), block_height)
+                        .await?;
+                    let value_vec: &[u8] = code.as_ref();
+                    redis_connection
+                        .set([redis_key.as_slice(), b":", block_hash.as_ref()].concat(), value_vec)
+                        .await?;
+                }
+                StateChangeValueView::ContractCodeDeletion { account_id } => {
+                    println!("ContractCodeDeletion {}", account_id);
+                    let redis_key = [b"code:", account_id.as_ref().as_bytes()].concat();
+                    redis_connection
+                        .zadd(redis_key, block_hash.as_ref(), block_height)
+                        .await?;
+                }
+                StateChangeValueView::AccountUpdate { account_id, account } => {
+                    println!("AccountUpdate {}", account_id);
+                    let redis_key = account_id.as_ref().as_bytes();
+                    redis_connection
+                        .zadd([b"account:", redis_key].concat(), block_hash.as_ref(), block_height)
+                        .await?;
+                    let value = Account::from(account).try_to_vec().unwrap();
+                    redis_connection
+                        .set([b"account-data:", redis_key, b":", block_hash.as_ref()].concat(), value)
+                        .await?;
+                }
+                StateChangeValueView::AccountDeletion { account_id } => {
+                    println!("AccountDeletion {}", account_id);
+                    redis_connection
+                        .zadd([b"account:", account_id.as_ref().as_bytes()].concat(), block_hash.as_ref(), block_height)
+                        .await?;
+                }
+                _ => {}
             }
-            StateChangeValueView::DataDeletion { account_id, key } => {
-                println!("DataDeletion {}", account_id);
-                let redis_key = [b"data:", account_id.as_ref().as_bytes(), b":", key.as_ref()].concat();
-                redis_connection
-                    .zadd(redis_key, block_hash.as_ref(), block_height)
-                    .await?;
-            }
-            StateChangeValueView::ContractCodeUpdate { account_id, code } => {
-                println!("ContractCodeUpdate {}", account_id);
-                let redis_key = [b"code:", account_id.as_ref().as_bytes()].concat();
-                redis_connection
-                    .zadd(redis_key.as_slice(), block_hash.as_ref(), block_height)
-                    .await?;
-                let value_vec: &[u8] = code.as_ref();
-                redis_connection
-                    .set([redis_key.as_slice(), b":", block_hash.as_ref()].concat(), value_vec)
-                    .await?;
-            }
-            StateChangeValueView::ContractCodeDeletion { account_id } => {
-                println!("ContractCodeDeletion {}", account_id);
-                let redis_key = [b"code:", account_id.as_ref().as_bytes()].concat();
-                redis_connection
-                    .zadd(redis_key, block_hash.as_ref(), block_height)
-                    .await?;
-            }
-            StateChangeValueView::AccountUpdate { account_id, account } => {
-                println!("AccountUpdate {}", account_id);
-                let redis_key = account_id.as_ref().as_bytes();
-                redis_connection
-                    .zadd([b"account:", redis_key].concat(), block_hash.as_ref(), block_height)
-                    .await?;
-                let value = Account::from(account).try_to_vec().unwrap();
-                redis_connection
-                    .set([b"account-data:", redis_key, b":", block_hash.as_ref()].concat(), value)
-                    .await?;
-            }
-            StateChangeValueView::AccountDeletion { account_id } => {
-                println!("AccountDeletion {}", account_id);
-                redis_connection
-                    .zadd([b"account:", account_id.as_ref().as_bytes()].concat(), block_hash.as_ref(), block_height)
-                    .await?;
-            }
-            _ => {}
         }
     }
 
@@ -224,7 +226,7 @@ fn main() {
             let system = actix::System::new();
             system.block_on(async move {
                 let indexer_config = construct_near_indexer_config(home_dir, args.clone()).await;
-                let indexer = near_indexer::Indexer::new(indexer_config);
+                let indexer = near_indexer::Indexer::new(indexer_config).unwrap();
 
                 // Regular indexer process starts here
                 let stream = indexer.streamer();
