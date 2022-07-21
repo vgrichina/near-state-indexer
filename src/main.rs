@@ -79,6 +79,17 @@ async fn handle_message(streamer_message: near_indexer::StreamerMessage, _strict
                     handle_update(&mut redis_connection, block_hash, block_height, b"d", &account_id, Some(key.as_ref()), None).await?;
                     println!("DataDeletion {}", account_id);
                 }
+                StateChangeValueView::AccessKeyUpdate { account_id, public_key, access_key } => {
+                    let data_key = public_key.try_to_vec().unwrap();
+                    let value = access_key.try_to_vec().unwrap();
+                    handle_update(&mut redis_connection, block_hash, block_height, b"k", &account_id, Some(&data_key), Some(&value)).await?;
+                    println!("AccessKeyUpdate {}", account_id);
+                }
+                StateChangeValueView::AccessKeyDeletion { account_id, public_key } => {
+                    let data_key = public_key.try_to_vec().unwrap();
+                    handle_update(&mut redis_connection, block_hash, block_height, b"k", &account_id, Some(&data_key), None).await?;
+                    println!("AccessKeyDeletion {}", account_id);
+                }
                 StateChangeValueView::ContractCodeUpdate { account_id, code } => {
                     handle_update(&mut redis_connection, block_hash, block_height, b"c", &account_id, None, Some(code.as_ref())).await?;
                     println!("ContractCodeUpdate {}", account_id);
@@ -100,7 +111,6 @@ async fn handle_message(streamer_message: near_indexer::StreamerMessage, _strict
                         .zadd([b"h:a:", redis_key].concat(), block_hash.as_ref(), block_height)
                         .await?;
                 }
-                _ => {}
             }
         }
     }
