@@ -1,6 +1,7 @@
-use std::convert::TryFrom;
+pub use clap::{Parser, Subcommand};
 
-use clap::Parser;
+use near_jsonrpc_client::{methods, JsonRpcClient};
+use near_lake_framework::near_indexer_primitives::types::{BlockReference, Finality};
 
 /// NEAR Indexer for Explorer
 /// Watches for stream of blocks from the chain
@@ -14,117 +15,145 @@ use clap::Parser;
     setting(clap::AppSettings::NextLineHelp)
 )]
 pub(crate) struct Opts {
-    /// Sets a custom config dir. Defaults to ~/.near/
-    #[clap(short, long)]
-    pub home_dir: Option<std::path::PathBuf>,
+    #[clap(long, default_value = "redis://127.0.0.1", env)]
+    pub redis_url: String,
+    /// AWS Access Key with the rights to read from AWS S3
+    #[clap(long, env)]
+    pub lake_aws_access_key: String,
+    #[clap(long, env)]
+    /// AWS Secret Access Key with the rights to read from AWS S3
+    pub lake_aws_secret_access_key: String,
+    /// Chain ID: testnet or mainnet
     #[clap(subcommand)]
-    pub subcmd: SubCommand,
+    pub chain_id: ChainId,
 }
 
-#[derive(Parser, Debug)]
-pub(crate) enum SubCommand {
-    /// Run NEAR Indexer Example. Start observe the network
-    Run(RunArgs),
-    /// Initialize necessary configs
-    Init(InitConfigArgs),
-}
-
-#[derive(Parser, Debug, Clone)]
-pub(crate) struct RunArgs {
-    /// Store initial data from genesis like Accounts, AccessKeys
-    #[clap(long)]
-    pub store_genesis: bool,
-    /// Force streaming while node is syncing
-    #[clap(long)]
-    pub stream_while_syncing: bool,
-    /// Switches indexer to non-strict mode (skips Receipts without parent Transaction hash, stops storing AccountChanges and AccessKeys)
-    #[clap(long)]
-    pub non_strict_mode: bool,
-    /// Stops indexer completely after indexing the provided number of blocks
-    #[clap(long, short)]
-    pub stop_after_number_of_blocks: Option<std::num::NonZeroUsize>,
-    /// Sets the concurrency for indexing. Note: concurrency (set to 2+) may lead to warnings due to tight constraints between transactions and receipts (those will get resolved eventually, but unless it is the second pass of indexing, concurrency won't help at the moment).
-    #[clap(long, default_value = "1")]
-    pub concurrency: std::num::NonZeroU16,
+#[derive(Subcommand, Debug, Clone)]
+pub enum ChainId {
     #[clap(subcommand)]
-    pub sync_mode: SyncModeSubCommand,
+    Mainnet(StartOptions),
+    #[clap(subcommand)]
+    Testnet(StartOptions),
 }
 
-#[allow(clippy::enum_variant_names)] // we want commands to be more explicit
-#[derive(Parser, Debug, Clone)]
-pub(crate) enum SyncModeSubCommand {
-    /// continue from the block Indexer was interrupted
-    SyncFromInterruption(InterruptionArgs),
-    /// start from the newest block after node finishes syncing
-    SyncFromLatest,
-    /// start from specified block height
-    SyncFromBlock(BlockArgs),
+#[derive(Subcommand, Debug, Clone)]
+pub enum StartOptions {
+    FromBlock { height: u64 },
+    FromInterruption,
+    FromLatest,
 }
 
-#[derive(Parser, Debug, Clone)]
-pub(crate) struct InterruptionArgs {
-    /// start indexing this number of blocks earlier than the actual interruption happened
-    #[clap(long, default_value = "0")]
-    pub delta: u64,
-}
+impl Opts {
+    // pub fn chain_id(&self) -> crate::types::primitives::ChainId {
+    //     match self.chain_id {
+    //         ChainId::Mainnet(_) => crate::types::primitives::ChainId::Mainnet,
+    //         ChainId::Testnet(_) => crate::types::primitives::ChainId::Testnet,
+    //     }
+    // }
 
-#[derive(Parser, Debug, Clone)]
-pub(crate) struct BlockArgs {
-    /// block height for block sync mode
-    #[clap(long)]
-    pub height: u64,
-}
-
-impl TryFrom<SyncModeSubCommand> for near_indexer::SyncModeEnum {
-    type Error = &'static str;
-
-    fn try_from(sync_mode: SyncModeSubCommand) -> Result<Self, Self::Error> {
-        match sync_mode {
-            SyncModeSubCommand::SyncFromInterruption(_) => Err("Unable to convert SyncFromInterruption variant because it has additional parameter which is not acceptable by near_indexer::SyncModeEnum::SyncFromInterruption"),
-            SyncModeSubCommand::SyncFromLatest => Ok(Self::LatestSynced),
-            SyncModeSubCommand::SyncFromBlock(args) => Ok(Self::BlockHeight(args.height)),
+    /// Returns [StartOptions] for current [Opts]
+    pub fn start_options(&self) -> &StartOptions {
+        match &self.chain_id {
+            ChainId::Mainnet(start_options) | ChainId::Testnet(start_options) => start_options,
         }
+    }
+
+    // Creates AWS Credentials for NEAR Lake
+    fn lake_credentials(&self) -> aws_types::credentials::SharedCredentialsProvider {
+        let provider = aws_types::Credentials::new(
+            self.lake_aws_access_key.clone(),
+            self.lake_aws_secret_access_key.clone(),
+            None,
+            None,
+            "alertexer_lake",
+        );
+        aws_types::credentials::SharedCredentialsProvider::new(provider)
+    }
+
+    /// Creates AWS Shared Config for NEAR Lake
+    pub fn lake_aws_sdk_config(&self) -> aws_types::sdk_config::SdkConfig {
+        aws_types::sdk_config::SdkConfig::builder()
+            .credentials_provider(self.lake_credentials())
+            .region(aws_types::region::Region::new("eu-central-1"))
+            .build()
+    }
+
+    pub fn rpc_url(&self) -> &str {
+        match self.chain_id {
+            ChainId::Mainnet(_) => "https://rpc.mainnet.near.org",
+            ChainId::Testnet(_) => "https://rpc.testnet.near.org",
+        }
+    }
+
+    pub async fn redis_client(&self) -> anyhow::Result<redis::aio::ConnectionManager> {
+        Ok(redis::Client::open(self.redis_url.clone())?
+            .get_tokio_connection_manager()
+            .await?)
     }
 }
 
-#[derive(Parser, Debug)]
-pub(crate) struct InitConfigArgs {
-    /// chain/network id (localnet, testnet, devnet, betanet)
-    #[clap(short, long)]
-    pub chain_id: Option<String>,
-    /// Account ID for the validator key
-    #[clap(long)]
-    pub account_id: Option<String>,
-    /// Specify private key generated from seed (TESTING ONLY)
-    #[clap(long)]
-    pub test_seed: Option<String>,
-    /// Number of shards to initialize the chain with
-    #[clap(short, long, default_value = "1")]
-    pub num_shards: u64,
-    /// Makes block production fast (TESTING ONLY)
-    #[clap(short, long)]
-    pub fast: bool,
-    /// Genesis file to use when initialize testnet (including downloading)
-    #[clap(short, long)]
-    pub genesis: Option<String>,
-    #[clap(short, long)]
-    /// Download the verified NEAR config file automatically.
-    #[clap(long)]
-    pub download_config: bool,
-    #[clap(long)]
-    pub download_config_url: Option<String>,
-    /// Download the verified NEAR genesis file automatically.
-    #[clap(long)]
-    pub download_genesis: bool,
-    /// Specify a custom download URL for the genesis-file.
-    #[clap(long)]
-    pub download_genesis_url: Option<String>,
-    /// Customize max_gas_burnt_view runtime limit.  If not specified, value
-    /// from genesis configuration will be taken.
-    #[clap(long)]
-    pub max_gas_burnt_view: Option<u64>,
-    /// Initialize boots nodes in <node_key>@<ip_addr> format seperated by commas
-    /// to bootstrap the network and store them in config.json
-    #[clap(long)]
-    pub boot_nodes: Option<String>,
+impl Opts {
+    pub async fn to_lake_config(&self) -> near_lake_framework::LakeConfig {
+        let s3_config = aws_sdk_s3::config::Builder::from(&self.lake_aws_sdk_config()).build();
+
+        let config_builder = near_lake_framework::LakeConfigBuilder::default().s3_config(s3_config);
+
+        match &self.chain_id {
+            ChainId::Mainnet(_) => config_builder
+                .mainnet()
+                .start_block_height(get_start_block_height(self).await),
+            ChainId::Testnet(_) => config_builder
+                .testnet()
+                .start_block_height(get_start_block_height(self).await),
+        }
+        .build()
+        .expect("Failed to build LakeConfig")
+    }
+}
+
+// TODO: refactor to read from Redis once `storage` is extracted to a separate crate
+async fn get_start_block_height(opts: &Opts) -> u64 {
+    match opts.start_options() {
+        StartOptions::FromBlock { height } => *height,
+        StartOptions::FromInterruption => {
+            let redis_connection_manager = match opts.redis_client().await {
+                Ok(connection_manager) => connection_manager,
+                Err(err) => {
+                    tracing::warn!(
+                        target: "alertexer",
+                        "Failed to connect to Redis to get last synced block, failing to the latest...\n{:#?}",
+                        err,
+                    );
+                    return final_block_height(opts).await;
+                }
+            };
+            match redis::cmd("GET")
+                .arg("last_indexed_block")
+                .query_async(&mut redis_connection_manager.clone())
+                .await
+            {
+                Ok(last_indexed_block) => last_indexed_block,
+                Err(err) => {
+                    tracing::warn!(
+                        target: crate::INDEXER_FOR_EXPLORER,
+                        "Failed to get last indexer block from Redis. Failing to the latest one...\n{:#?}",
+                        err
+                    );
+                    final_block_height(opts).await
+                }
+            }
+        }
+        StartOptions::FromLatest => final_block_height(opts).await,
+    }
+}
+
+async fn final_block_height(opts: &Opts) -> u64 {
+    let client = JsonRpcClient::connect(opts.rpc_url());
+    let request = methods::block::RpcBlockRequest {
+        block_reference: BlockReference::Finality(Finality::Final),
+    };
+
+    let latest_block = client.call(request).await.unwrap();
+
+    latest_block.header.height
 }
