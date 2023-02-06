@@ -1,6 +1,10 @@
-use std::convert::TryFrom;
+use bigdecimal::ToPrimitive;
+pub use clap::{Parser, Subcommand};
 
-use clap::Parser;
+use scylla::{Session, SessionBuilder};
+
+use near_jsonrpc_client::{methods, JsonRpcClient};
+use near_lake_framework::near_indexer_primitives::types::{BlockReference, Finality};
 
 /// NEAR Indexer for Explorer
 /// Watches for stream of blocks from the chain
@@ -14,117 +18,211 @@ use clap::Parser;
     setting(clap::AppSettings::NextLineHelp)
 )]
 pub(crate) struct Opts {
-    /// Sets a custom config dir. Defaults to ~/.near/
-    #[clap(short, long)]
-    pub home_dir: Option<std::path::PathBuf>,
+    /// Indexer ID to handle meta data about the instance
+    #[clap(long, env)]
+    pub indexer_id: String,
+    /// ScyllaDB connection string
+    #[clap(long, default_value = "127.0.0.1:9042", env)]
+    pub scylla_url: String,
+    /// ScyllaDB keyspace
+    #[clap(long, default_value = "state_indexer", env)]
+    pub scylla_keyspace: String,
+    /// Chain ID: testnet or mainnet
     #[clap(subcommand)]
-    pub subcmd: SubCommand,
+    pub chain_id: ChainId,
 }
 
-#[derive(Parser, Debug)]
-pub(crate) enum SubCommand {
-    /// Run NEAR Indexer Example. Start observe the network
-    Run(RunArgs),
-    /// Initialize necessary configs
-    Init(InitConfigArgs),
-}
-
-#[derive(Parser, Debug, Clone)]
-pub(crate) struct RunArgs {
-    /// Store initial data from genesis like Accounts, AccessKeys
-    #[clap(long)]
-    pub store_genesis: bool,
-    /// Force streaming while node is syncing
-    #[clap(long)]
-    pub stream_while_syncing: bool,
-    /// Switches indexer to non-strict mode (skips Receipts without parent Transaction hash, stops storing AccountChanges and AccessKeys)
-    #[clap(long)]
-    pub non_strict_mode: bool,
-    /// Stops indexer completely after indexing the provided number of blocks
-    #[clap(long, short)]
-    pub stop_after_number_of_blocks: Option<std::num::NonZeroUsize>,
-    /// Sets the concurrency for indexing. Note: concurrency (set to 2+) may lead to warnings due to tight constraints between transactions and receipts (those will get resolved eventually, but unless it is the second pass of indexing, concurrency won't help at the moment).
-    #[clap(long, default_value = "1")]
-    pub concurrency: std::num::NonZeroU16,
+#[derive(Subcommand, Debug, Clone)]
+pub enum ChainId {
     #[clap(subcommand)]
-    pub sync_mode: SyncModeSubCommand,
+    Mainnet(StartOptions),
+    #[clap(subcommand)]
+    Testnet(StartOptions),
 }
 
-#[allow(clippy::enum_variant_names)] // we want commands to be more explicit
-#[derive(Parser, Debug, Clone)]
-pub(crate) enum SyncModeSubCommand {
-    /// continue from the block Indexer was interrupted
-    SyncFromInterruption(InterruptionArgs),
-    /// start from the newest block after node finishes syncing
-    SyncFromLatest,
-    /// start from specified block height
-    SyncFromBlock(BlockArgs),
+#[allow(clippy::enum_variant_names)]
+#[derive(Subcommand, Debug, Clone)]
+pub enum StartOptions {
+    FromBlock { height: u64 },
+    FromInterruption,
+    FromLatest,
 }
 
-#[derive(Parser, Debug, Clone)]
-pub(crate) struct InterruptionArgs {
-    /// start indexing this number of blocks earlier than the actual interruption happened
-    #[clap(long, default_value = "0")]
-    pub delta: u64,
-}
+impl Opts {
+    /// Returns [StartOptions] for current [Opts]
+    pub fn start_options(&self) -> &StartOptions {
+        match &self.chain_id {
+            ChainId::Mainnet(start_options) | ChainId::Testnet(start_options) => start_options,
+        }
+    }
 
-#[derive(Parser, Debug, Clone)]
-pub(crate) struct BlockArgs {
-    /// block height for block sync mode
-    #[clap(long)]
-    pub height: u64,
-}
-
-impl TryFrom<SyncModeSubCommand> for near_indexer::SyncModeEnum {
-    type Error = &'static str;
-
-    fn try_from(sync_mode: SyncModeSubCommand) -> Result<Self, Self::Error> {
-        match sync_mode {
-            SyncModeSubCommand::SyncFromInterruption(_) => Err("Unable to convert SyncFromInterruption variant because it has additional parameter which is not acceptable by near_indexer::SyncModeEnum::SyncFromInterruption"),
-            SyncModeSubCommand::SyncFromLatest => Ok(Self::LatestSynced),
-            SyncModeSubCommand::SyncFromBlock(args) => Ok(Self::BlockHeight(args.height)),
+    pub fn rpc_url(&self) -> &str {
+        match self.chain_id {
+            ChainId::Mainnet(_) => "https://rpc.mainnet.near.org",
+            ChainId::Testnet(_) => "https://rpc.testnet.near.org",
         }
     }
 }
 
-#[derive(Parser, Debug)]
-pub(crate) struct InitConfigArgs {
-    /// chain/network id (localnet, testnet, devnet, betanet)
-    #[clap(short, long)]
-    pub chain_id: Option<String>,
-    /// Account ID for the validator key
-    #[clap(long)]
-    pub account_id: Option<String>,
-    /// Specify private key generated from seed (TESTING ONLY)
-    #[clap(long)]
-    pub test_seed: Option<String>,
-    /// Number of shards to initialize the chain with
-    #[clap(short, long, default_value = "1")]
-    pub num_shards: u64,
-    /// Makes block production fast (TESTING ONLY)
-    #[clap(short, long)]
-    pub fast: bool,
-    /// Genesis file to use when initialize testnet (including downloading)
-    #[clap(short, long)]
-    pub genesis: Option<String>,
-    #[clap(short, long)]
-    /// Download the verified NEAR config file automatically.
-    #[clap(long)]
-    pub download_config: bool,
-    #[clap(long)]
-    pub download_config_url: Option<String>,
-    /// Download the verified NEAR genesis file automatically.
-    #[clap(long)]
-    pub download_genesis: bool,
-    /// Specify a custom download URL for the genesis-file.
-    #[clap(long)]
-    pub download_genesis_url: Option<String>,
-    /// Customize max_gas_burnt_view runtime limit.  If not specified, value
-    /// from genesis configuration will be taken.
-    #[clap(long)]
-    pub max_gas_burnt_view: Option<u64>,
-    /// Initialize boots nodes in <node_key>@<ip_addr> format seperated by commas
-    /// to bootstrap the network and store them in config.json
-    #[clap(long)]
-    pub boot_nodes: Option<String>,
+impl Opts {
+    pub async fn to_lake_config(&self) -> anyhow::Result<near_lake_framework::LakeConfig> {
+        migrate(&self.scylla_url, &self.scylla_keyspace).await?;
+
+        let config_builder = near_lake_framework::LakeConfigBuilder::default();
+
+        Ok(match &self.chain_id {
+            ChainId::Mainnet(_) => config_builder
+                .mainnet()
+                .start_block_height(get_start_block_height(self).await?),
+            ChainId::Testnet(_) => config_builder
+                .testnet()
+                .start_block_height(get_start_block_height(self).await?),
+        }
+        .build()
+        .expect("Failed to build LakeConfig"))
+    }
+}
+
+async fn get_start_block_height(opts: &Opts) -> anyhow::Result<u64> {
+    match opts.start_options() {
+        StartOptions::FromBlock { height } => Ok(*height),
+        StartOptions::FromInterruption => {
+            let scylladb_session = get_scylladb_session(&opts.scylla_url, &opts.scylla_keyspace).await?;
+
+            let row = scylladb_session
+                .query("SELECT last_processed_block_height FROM meta WHERE indexer_id = ?", (&opts.indexer_id,))
+                .await?
+                .single_row();
+
+            if let Ok(row) = row {
+                let (block_height,) : (num_bigint::BigInt,) = row.into_typed::<(num_bigint::BigInt,)>()?;
+                Ok(block_height
+                    .to_u64()
+                    .expect("Failed to convert BigInt to u64"))
+            } else {
+                Ok(final_block_height(opts).await)
+            }
+        }
+        StartOptions::FromLatest => Ok(final_block_height(opts).await),
+    }
+}
+
+async fn final_block_height(opts: &Opts) -> u64 {
+    tracing::debug!(target: crate::INDEXER, "Fetching final block from NEAR RPC",);
+    let client = JsonRpcClient::connect(opts.rpc_url());
+    let request = methods::block::RpcBlockRequest {
+        block_reference: BlockReference::Finality(Finality::Final),
+    };
+
+    let latest_block = client.call(request).await.unwrap();
+
+    latest_block.header.height
+}
+
+// Database schema
+// Main table to keep all the state changes happening in NEAR Protocol
+// CREATE TABLE state_changes (
+//     account_id varchar,
+//     block_height varint,
+//     block_hash varchar,
+//     change_scope varchar,
+//     data_key BLOB,
+//     data_value BLOB,
+//     PRIMARY KEY ((account_id, change_scope), block_height) -- prim key like this because we mostly are going to query by these 3 fields
+// );
+//
+// Map-table to store relation between block_hash-block_height and included chunk hashes
+// CREATE TABLE IF NOT EXISTS blocks (
+//     block_hash varchar,
+//     bloch_height varint,
+//     chunks set<varchar>,
+//     PRIMARY KEY (block_height)
+// );
+//
+// Meta table to provide start from interruption
+// CREATE TABLE IF NOT EXISTS meta (
+//     indexer_id varchar PRIMARY KEY,
+//     last_processed_block_height varint
+// )
+pub(crate) async fn migrate(scylla_url: &str, scylla_keyspace: &str) -> anyhow::Result<()> {
+    let scylladb_session = SessionBuilder::new().known_node(scylla_url).build().await?;
+    let mut str_query = format!("CREATE KEYSPACE IF NOT EXISTS {scylla_keyspace} ");
+    str_query.push_str("WITH REPLICATION = {'class': 'SimpleStrategy', 'replication_factor': 1};");
+
+    scylladb_session
+        .query(
+            str_query,
+            &[],
+        )
+        .await?;
+
+    scylladb_session.use_keyspace(scylla_keyspace, false).await?;
+
+    scylladb_session
+        .query(
+            "
+            CREATE TABLE IF NOT EXISTS state_changes (
+                account_id varchar,
+                block_height varint,
+                block_hash varchar,
+                change_scope varchar,
+                data_key BLOB,
+                data_value BLOB,
+                PRIMARY KEY ((account_id, change_scope), block_height)
+            ) WITH CLUSTERING ORDER BY (block_height DESC)
+        ",
+            &[],
+        )
+        .await?;
+
+    scylladb_session
+        .query(
+            "
+            CREATE TABLE IF NOT EXISTS blocks (
+                block_height varint,
+                block_hash varchar,
+                chunks set<varchar>,
+                PRIMARY KEY (block_hash)
+            )
+        ",
+            &[],
+        )
+        .await?;
+
+    scylladb_session
+        .query(
+            "
+            CREATE TABLE IF NOT EXISTS meta (
+                indexer_id varchar PRIMARY KEY,
+                last_processed_block_height varint
+            )
+        ",
+            &[],
+        )
+        .await?;
+
+    scylladb_session
+        .query(
+            "
+            CREATE TABLE IF NOT EXISTS account_state (
+                account_id varchar,
+                data_key BLOB,
+                PRIMARY KEY (account_id, data_key),
+            )
+        ",
+            &[],
+        )
+        .await?;
+
+    Ok(())
+}
+
+pub(crate) async fn get_scylladb_session(scylla_url: &str, scylla_keyspace: &str) -> anyhow::Result<Session> {
+    tracing::debug!(target: crate::INDEXER, "Connecting to ScyllaDB");
+    let session: Session = SessionBuilder::new()
+        .known_node(scylla_url)
+        .use_keyspace(scylla_keyspace, false)
+        .build()
+        .await?;
+    Ok(session)
 }
